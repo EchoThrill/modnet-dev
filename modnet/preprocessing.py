@@ -640,7 +640,7 @@ class MODData:
                     f"Targets must have same length as structures: {np.shape(targets)} vs {len(materials)}"
                 )
 
-        if materials is not None and isinstance(materials[0], Composition):
+        if materials is not None and isinstance(materials.iloc[0], Composition):
             materials = [CompositionContainer(s) for s in materials]
             self._composition_only = True
 
