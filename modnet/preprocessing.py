@@ -101,6 +101,15 @@ def nmi_target(
     if df_target.shape[1] != 1:
         raise ValueError("The target DataFrame should have exactly one column.")
 
+    # Remove NaN targets
+    if df_target.isna().any().any():
+        nan_indices = df_target[df_target.isna().any(axis=1)].index
+        df_feat = df_feat.drop(nan_indices)
+        df_target = df_target.drop(nan_indices)
+        LOG.info(
+            f"Removed {len(nan_indices)} data points with NaN target values."
+        )
+
     # handles one-hot encoded targets
     if task_type == "classification" and (
         isinstance(df_target.iloc[0, 0], list)
