@@ -19,6 +19,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 import tensorflow as tf
 
+from modnet.losses import MAENanLoss
 from modnet.preprocessing import MODData
 from modnet.utils import LOG
 from modnet import __version__
@@ -465,7 +466,7 @@ class MODNetModel:
         fit_params.update(fit_params_kw)
 
         if loss is None:
-            loss = "mse"
+            loss = MAENanLoss()
         self.model.compile(
             loss=loss,
             optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=lr),
