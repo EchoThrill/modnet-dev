@@ -349,6 +349,94 @@ def test_train_small_bootstrap_multi_target(small_moddata, tf_session):
     model.predict(data, return_unc=True)
 
 
+def _partially_label(data, target, n_blank, seed=0):
+    """Replace `n_blank` of `target`'s labels with NaN, leaving the rest intact.
+
+    Returns the blanked `data` and the labels that survived.
+    """
+    rng = np.random.default_rng(seed)
+    blanked = rng.choice(len(data.df_targets), size=n_blank, replace=False)
+    data.df_targets.loc[data.df_targets.index[blanked], target] = np.nan
+    data.optimal_features = [
+        col for col in data.df_featurized.columns if col.startswith("ElementProperty")
+    ]
+    return data, data.df_targets[target].dropna()
+
+
+def _single_target_model(model_cls=None, **kwargs):
+    from modnet.models import MODNetModel
+
+    return (model_cls or MODNetModel)(
+        [[["eform"]]],
+        weights={"eform": 1},
+        num_neurons=[[16], [8], [8], [4]],
+        n_feat=10,
+        **kwargs,
+    )
+
+
+def test_fit_rejects_nan_targets_under_non_nan_aware_loss(subset_moddata, tf_session):
+    """A non-NaN-aware loss must refuse NaN targets up front."""
+    data, _ = _partially_label(subset_moddata, "eform", 40)
+
+    with pytest.raises(ValueError, match="propagates them to its value"):
+        _single_target_model().fit(data, epochs=2)
+
+
+def test_train_small_model_partial_labels(subset_moddata, tf_session):
+    """`loss='maen'` trains a model end-to-end on a partially-labelled target."""
+    data, _ = _partially_label(subset_moddata, "eform", 40)
+    assert data.df_targets["eform"].isna().sum() == 40, "fixture should be partial"
+
+    model = _single_target_model()
+    model.fit(data, epochs=5, loss="maen")
+
+    assert all(np.isfinite(w).all() for w in model.model.get_weights())
+
+    predictions = model.predict(data)
+    assert list(predictions.columns) == ["eform"]
+    assert list(predictions.index) == list(data.df_targets.index)
+    assert predictions.shape == (len(data.df_targets), 1)
+    assert np.isfinite(predictions.values.astype(float)).all()
+
+    assert np.isfinite(model.evaluate(data, loss="maen"))
+
+
+def test_prediction_bounds_ignore_nan_targets(subset_moddata, tf_session):
+    """Prediction clamping bounds come from the observed labels only.
+
+    `min`/`max` over a target holding NaN propagates NaN into the bounds,
+    which silently disables the out-of-bounds remapping in `predict`.
+    """
+    data, observed = _partially_label(subset_moddata, "eform", 40)
+
+    model = _single_target_model()
+    model.fit(data, epochs=2, loss="maen")
+
+    assert float(model.min_y[0][0]) == pytest.approx(observed.min())
+    assert float(model.max_y[0][0]) == pytest.approx(observed.max())
+
+
+def test_train_small_bootstrap_partial_labels(subset_moddata, tf_session):
+    """Ensembles train on partial labels and forward `loss` down to each member."""
+    from modnet.models import EnsembleMODNetModel
+
+    data, _ = _partially_label(subset_moddata, "eform", 40)
+
+    model = _single_target_model(EnsembleMODNetModel, n_models=2, bootstrap=True)
+    model.fit(data, epochs=2, loss="maen")
+
+    predictions, stds = model.predict(data, return_unc=True)
+    assert list(predictions.columns) == ["eform"]
+    assert np.isfinite(predictions.values.astype(float)).all()
+    assert stds.shape == predictions.shape
+    assert (stds.values.astype(float) >= 0).all()
+
+    assert np.isfinite(model.evaluate(data, loss="maen"))
+    with pytest.raises(RuntimeError, match="not recognized"):
+        model.evaluate(data, loss="not_a_loss")
+
+
 @pytest.mark.slow
 def test_train_small_bootstrap_presets(small_moddata, tf_session):
     """Tests the `fit_preset()` method."""

@@ -165,6 +165,38 @@ def test_nmi_target():
     assert df_nmi_target.loc["x"]["z"] == pytest.approx(0.3417665092162398)
 
 
+def test_nmi_target_nan_drop():
+    """nmi_target drops exactly the NaN target rows and scores the survivors.
+
+    The target is noisy on purpose: on a noiseless one the NMI saturates at 1.0
+    and stays there whether 80 rows survive the drop or 10, so the assertions
+    would not notice rows going that should have been kept.
+    """
+    npoints = 100
+    np.random.seed(42)
+    x = np.random.rand(npoints)
+    y = 2 * x - 2
+    z = 4 * x + 1.0 * np.random.rand(npoints)
+
+    nan_rows = np.zeros(npoints, dtype=bool)
+    nan_rows[::5] = True  # 20 NaN values
+    df_feat = pd.DataFrame({"x": x, "y": y})
+    df_target = pd.DataFrame({"z": np.where(nan_rows, np.nan, z)})
+
+    df_nmi = nmi_target(
+        df_feat=df_feat, df_target=df_target, n_neighbors=2, random_state=42
+    )
+
+    expected = nmi_target(
+        df_feat=df_feat[~nan_rows],
+        df_target=df_target[~nan_rows],
+        n_neighbors=2,
+        random_state=42,
+    )
+    assert df_nmi.shape == (2, 1)
+    assert df_nmi["z"].values == pytest.approx(expected["z"].values)
+
+
 def test_nmi_target_classif():
     # Test with linear discrete data (should get 1.0 mutual information, or very close due to algorithm used
     # in mutual_info_regression)

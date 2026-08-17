@@ -114,10 +114,17 @@ def small_moddata_composition_2020():
 
 @pytest.fixture(scope="module")
 def tf_session():
-    """This fixture can be used to sandbox tests that require tensorflow."""
+    """This fixture can be used to sandbox tests that require tensorflow.
+
+    Note: this fixture used to call `tf.compat.v1.disable_eager_execution()`.
+    That switch is process-global and cannot be undone, so a single test using
+    this fixture put every later test in the session into graph mode --
+    silently breaking anything that relies on eager side effects (e.g. a
+    `tf.keras.metrics.Metric` whose `update_state` is never run). Keep this
+    fixture free of global mode switches.
+    """
     import tensorflow
 
-    tensorflow.compat.v1.disable_eager_execution()
     with tensorflow.device("/device:CPU:0") as session:
         yield session
 

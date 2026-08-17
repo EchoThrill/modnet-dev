@@ -19,6 +19,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 import tensorflow as tf
 
+from modnet.losses import MAENanLoss, MAENanMetric, check_nan_targets, resolve_loss
 from modnet.preprocessing import MODData
 from modnet.utils import LOG
 from modnet import __version__
@@ -276,7 +277,7 @@ class MODNetModel:
         xscale: Optional[str] = "minmax",
         impute_missing: Optional[Union[float, str]] = 0,
         xscale_before_impute: bool = True,
-        metrics: List[str] = ["mae"],
+        metrics: Optional[List[Union[str, tf.keras.metrics.Metric]]] = None,
         callbacks: List[Callable] = None,
         verbose: int = 0,
         loss: str = None,
@@ -313,12 +314,19 @@ class MODNetModel:
             xscale_before_impute: whether to first scale the input and then impute values, or
                 first impute values and then scale the inputs.
             metrics: A list of tf.keras metrics to pass to `compile(...)`.
+                Defaults to `[MAENanMetric()]`, a NaN-aware MAE metric.
             loss: The built-in tf.keras loss to pass to `compile(...)`.
+                Defaults to "mse". Pass "maen" (`MAENanLoss`) to train on
+                partially-labelled targets; a loss that propagates NaN raises
+                on NaN targets rather than silently producing NaN weights.
             fit_params: Any additional parameters to pass to `fit(...)`,
                 these will be overwritten by the explicit keyword
                 arguments above.
 
         """
+
+        if metrics is None:
+            metrics = [MAENanMetric()]
 
         if self.n_feat > len(training_data.get_optimal_descriptors()):
             raise RuntimeError(
@@ -422,8 +430,8 @@ class MODNetModel:
         self.min_y = []
         self.max_y = []
         for prop in self.targets_groups:
-            self.min_y.append(training_data.df_targets[prop].values.min(axis=0))
-            self.max_y.append(training_data.df_targets[prop].values.max(axis=0))
+            self.min_y.append(np.nanmin(training_data.df_targets[prop].values, axis=0))
+            self.max_y.append(np.nanmax(training_data.df_targets[prop].values, axis=0))
 
         # Optionally set up print callback
         if verbose:
@@ -464,8 +472,10 @@ class MODNetModel:
 
         fit_params.update(fit_params_kw)
 
+        loss = resolve_loss(loss)
         if loss is None:
             loss = "mse"
+        check_nan_targets(loss, y)
         self.model.compile(
             loss=loss,
             optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=lr),
@@ -828,13 +838,15 @@ class MODNetModel:
                 elif loss == "mse":
                     loss = mean_squared_error
                 elif isinstance(loss, str):
-                    raise RuntimeError(
-                        f"Loss {loss} not recognized. Use mae, mse or a callable."
-                    )
-                else:
-                    pass
+                    resolved = resolve_loss(loss)
+                    if isinstance(resolved, MAENanLoss):
+                        loss = resolved
+                    else:
+                        raise RuntimeError(
+                            f"Loss {loss} not recognized. Use mae, mse, maen or a callable."
+                        )
 
-                score.append(loss(y_true, y_pred[i]))
+                score.append(float(loss(y_true, y_pred[i])))
 
         return np.mean(score)
 

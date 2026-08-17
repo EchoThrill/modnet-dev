@@ -231,20 +231,20 @@ class EnsembleMODNetModel(MODNetModel):
         else:
             return df_mean
 
-    def evaluate(self, test_data: MODData) -> pd.DataFrame:
+    def evaluate(self, test_data: MODData, loss="mae") -> pd.DataFrame:
         """Evaluates the target values for the passed MODData by returning the corresponding loss.
 
         Parameters:
             test_data: A featurized and feature-selected `MODData`
                 object containing the descriptors used in training.
-
+            loss: Loss function to use. Supports the same values as `MODNetModel.evaluate`.
 
         Returns:
             Loss score
         """
         all_losses = np.zeros(self.n_models)
         for i, m in enumerate(self.models):
-            all_losses[i] = m.evaluate(test_data)
+            all_losses[i] = m.evaluate(test_data, loss=loss)
 
         return all_losses.mean()
 
@@ -552,7 +552,7 @@ def _validate_ensemble_model(
 
     learning_curves = [m.history["val_loss"] for m in model.models]
 
-    val_loss = model.evaluate(val_data)
+    val_loss = model.evaluate(val_data, loss=loss)
 
     model._make_picklable()
 
